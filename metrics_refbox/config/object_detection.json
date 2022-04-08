@@ -1,0 +1,67 @@
+{
+    "module": "metrics_refbox.object_detection",
+    "class": "ObjectDetectionConfig",
+    "trial_config": "object_detection_trials.json",
+    "timeout": 10.0,
+
+    "variations" :
+    {
+
+      "Target object":
+      [
+        "Cup",
+        "Plate",
+        "Bowl",
+        "Towel",
+        "Shoes",
+        "Sponge",
+        "Bottle",
+        "Toothbrush",
+        "Toothpaste",
+        "Tray",
+        "Sweater",
+        "Cellphone",
+        "Banana",
+        "Medicine bottle",
+        "Reading glasses",
+        "Flashlight",
+        "Pill box"
+      ],
+
+      "Secondary objects":
+      [
+        "Book",
+        "Knife",
+        "Keyboard",
+        "Cellphone charger",
+        "Shopping bag"
+      ],
+
+      "Target object present":
+      [
+        "Yes",
+        "No"
+      ],
+      "Location": "locations_list.txt"
+    },
+    "selection likelihood":
+    {
+      "Target object present":
+      [
+        0.9,
+        0.1
+      ]
+    },
+    "multiple choice variation": ["Secondary objects"],
+
+    "results":
+    {
+      "Result": "text_field",
+      "Object found": "text_field",
+      "Result type": "text_field",
+      "Image": "image"
+    },
+
+    "multiple choice result": []
+
+}

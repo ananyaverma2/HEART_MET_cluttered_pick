@@ -1,0 +1,75 @@
+{
+    "module": "metrics_refbox.handover_object",
+    "class": "HandoverObjectConfig",
+    "trial_config": "handover_object_trials.json",
+    "timeout": 30.0,
+
+    "variations" :
+    {
+      "Object":
+      [
+        "Cup",
+        "Plate",
+        "Bowl",
+        "Towel",
+        "Shoes",
+        "Sponge",
+        "Bottle",
+        "Toothbrush",
+        "Toothpaste",
+        "Tray",
+        "Sweater",
+        "Cellphone",
+        "Banana",
+        "Medicine bottle",
+        "Reading glasses",
+        "Flashlight",
+        "Pill box"
+      ],
+
+      "Pose":
+      [
+        "Standing",
+        "Sitting",
+        "Laying"
+      ],
+      "Person": "persons_list.txt",
+      "Location": "locations_list.txt",
+      "Pre-grasp behaviour":
+      [
+        "Reaches out",
+        "Does not reach out"
+      ],
+
+      "Behaviour during grasp":
+      [
+        "Grasps object",
+        "Does not grasp object"
+      ],
+      "Post-grasp behaviour":
+      [
+        "Keeps object in hand",
+        "Drops object"
+      ]
+    },
+    "selection likelihood":
+    {
+      "Pose":
+      [
+        0.33,
+        0.33,
+        0.34
+      ]
+    },
+    "multiple choice variation": [],
+
+    "results":
+    {
+      "Result": "text_field",
+      "Detected pose": "text_field",
+      "Detected pre-grasp behaviour": "text_field",
+      "Detected behaviour during grasp": "text_field",
+      "Detected post-grasp behaviour": "text_field"
+    },
+    "multiple choice result": []
+}
