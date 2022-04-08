@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<launch>
+    <node pkg="object_detection" type="convert_ros_img_to_cv.py" name="convert_rosImg_to_cvImg" output="screen">
+    </node>
+</launch>
