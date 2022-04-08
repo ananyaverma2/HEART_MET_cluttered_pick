@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<!-- Note: this is an example launch file, do not modify. -->
+<launch>
+  <arg name="file_path" default="~/.ros/bagfiles"/>
+  <arg name="file_prefix" default="b-it-bots"/>
+  <arg name="topics" default="$(find rosbag_recorder)/ros/config/topics.yaml" />
+
+  <node pkg="rosbag_recorder" type="rosbag_recorder_node"
+        name="$(anon rosbag_recorder)" output="screen">
+    <param name="topics" type="str" value="$(arg topics)"/>
+    <param name="file_path" type="str" value="$(arg file_path)"/>
+    <param name="file_prefix" type="str" value="$(arg file_prefix)"/>
+    <param name="timeout" type="double" value="5.0"/>
+    <param name="loop_rate" type="double" value="1.0"/>
+    <!-- use lz4 compression, and split bagfiles when the size reaches 1.5 G -->
+    <param name="rosbag_arguments" type="str" value="--lz4 --split --size 1536" />
+    <remap from="~event_in" to="/rosbag_recorder/event_in" />
+    <remap from="~event_out" to="/rosbag_recorder/event_out" />
+    <remap from="~filename" to="/rosbag_recorder/filename" />
+  </node>
+</launch>
