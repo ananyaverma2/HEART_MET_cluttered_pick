@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<launch>
+    <node pkg="object_detection" type="grasp_pose_estimation.py" name="convert_pose_2Dto3D" output="screen">
+    </node>
+</launch>
