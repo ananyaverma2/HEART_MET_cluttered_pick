@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 
-import sensor_msgs.msg
 import math
 import numpy as np
-from sensor_msgs import point_cloud2
 import rospy
-from scipy.spatial import cKDTree
-from sensor_msgs.msg import CameraInfo, PointCloud2, Image
+from sensor_msgs.msg import CameraInfo, Image
 import sys
 
 
@@ -83,6 +80,9 @@ class pose_estimation():
 
         print("the 2d points are : ", x,y)
 
+        rospy.loginfo("CV2IMG: %s" % cv2_img)
+        rospy.loginfo("CV2IMG_points: %s" % cv2_img[x][y])
+
         return [x,y]
 
     def callback_pointcloud(self, msg):
@@ -93,7 +93,6 @@ class pose_estimation():
         """
         self.cv2_img = self.imgmsg_to_cv2(msg)
         points = self.projectPixelTo3dRay(self.coor_2D, self.P, self.cv2_img)
-
 
 
 if __name__ == "__main__":
