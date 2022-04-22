@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
+
+
 import math
 import numpy as np
 import rospy
 from sensor_msgs.msg import CameraInfo, Image
 import sys
+import convert_ros_img_to_cv
 
 
 '''
@@ -77,13 +80,15 @@ class pose_estimation():
         norm = math.sqrt(x*x + y*y + 1)
         x /= norm
         y /= norm
+        z = 1.0 / norm
 
-        print("the 2d points are : ", x,y)
+        print("the 2d coordinates are : ", x,y,z)
 
-        rospy.loginfo("CV2IMG: %s" % cv2_img)
-        rospy.loginfo("CV2IMG_points: %s" % cv2_img[x][y])
+        rospy.loginfo("depth for the pixel value is : %s" % cv2_img[coor_2D[0]][coor_2D[1]])
 
-        return [x,y]
+        coord_3D = [x,y,z*(cv2_img[coor_2D[0]][coor_2D[1]]/1000)[0]]
+        print("The 3d coordinates are : ", coord_3D)
+        return coord_3D
 
     def callback_pointcloud(self, msg):
         """
@@ -97,5 +102,7 @@ class pose_estimation():
 
 if __name__ == "__main__":
     rospy.init_node("convert_pose_2Dto3D")
-    object_img = pose_estimation()
+    object_img = convert_ros_img_to_cv.convert_image()
+    # rospy.init_node("convert_pose_2Dto3D")
+    # object_img = pose_estimation()
     rospy.spin()
