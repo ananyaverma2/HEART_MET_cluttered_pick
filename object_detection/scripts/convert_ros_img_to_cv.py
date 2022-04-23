@@ -26,9 +26,8 @@ class object_detection():
         rospy.loginfo("Object Detection node is ready...")
         self.image_queue = None
         self.clip_size = 5 #manual number
-        self.stop_sub_flag = False
-        self.cnt = 0
-        self.final_bounding_boxes = []
+        self.detected_bounding_boxes = []
+        self.detected_object_names = []
 
         # COCO dataset labels
         self.COCO_INSTANCE_CATEGORY_NAMES = [
@@ -45,16 +44,6 @@ class object_detection():
             'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'N/A', 'book',
             'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush'
         ]
-        
-        # #publisher
-        # self.output_bb_pub = rospy.Publisher("/metrics_refbox_client/object_detection_result", ObjectDetectionResult, queue_size=10)
-        
-        # #subscriber
-        # self.requested_object = None
-        # self.referee_command_sub = rospy.Subscriber("/metrics_refbox/command", Command, self._referee_command_cb)
-
-        # # waiting for referee box to be ready
-        # rospy.loginfo("Waiting for referee box ...")
 
         rospy.loginfo("Run the .bag files...")
         self.image_sub = rospy.Subscriber("/hsrb/head_rgbd_sensor/rgb/image_raw", Image, self._input_image_cb)
@@ -86,74 +75,27 @@ class object_detection():
         :msg: sensor_msgs.Image
         :returns: None
         """
-
-        if not self.stop_sub_flag:
             
-            # convert ros image to opencv image
-            cv_image = self.imgmsg_to_cv2(msg)
-            if self.image_queue is None:
-                self.image_queue = []
+        # convert ros image to opencv image
+        cv_image = self.imgmsg_to_cv2(msg)
+        if self.image_queue is None:
+            self.image_queue = []
+        
+        self.image_queue.append(cv_image)
+
+        if len(self.image_queue) > self.clip_size:
+            #Clip size reached
+            # print("Clip size reached...")
+            rospy.loginfo("Image received..")
             
-            self.image_queue.append(cv_image)
-            # print("Counter: ", len(self.image_queue))
+            # deregister subscriber
+            self.image_sub.unregister()
 
-            if len(self.image_queue) > self.clip_size:
-                #Clip size reached
-                # print("Clip size reached...")
-                rospy.loginfo("Image received..")
-                
-                self.stop_sub_flag = True
+            # call object inference method
+            bounding_boxes, object_names = self.object_inference()  
 
-                # pop the first element
-                self.image_queue.pop(0)
-
-                # save all images on local drive
-
-                # create folder for incoming images
-                # get an instance of RosPack with the default search paths
-                rospack = rospkg.RosPack()
-
-                # get the file path for object_detection package
-                pkg_path = rospack.get_path('object_detection')
-                captured_images_path = pkg_path + "/captured_images/"
-                
-                if not os.path.exists(captured_images_path):
-                    # 'makedirs' creates a directory with it's path, if applicable.
-                    os.makedirs(captured_images_path)
-
-                # get date and time                    
-                # datetime object containing current date and time
-                now = datetime.now()
-
-                # dd/mm/YY H:M:S
-                dt_string = now.strftime("%d_%m_%Y_%H_%M_%S")
-
-                for i in self.image_queue:
-                    # save image path
-                    img_path = captured_images_path + 'captured_images_' + dt_string + '_' + str(self.cnt) + '.jpg'
-                    
-                    # save image to local drive
-                    cv2.imwrite(img_path, i)
-                    self.cnt+=1
-
-                rospy.loginfo("Input images saved on local drive")
-
-                # call object inference method
-                # print("Image queue size: ", len(self.image_queue))
-
-                # waiting for referee box to be ready
-                # rospy.loginfo("Waiting for referee box to be ready...")
-                # while self.requested_object is None:
-                #     pass
-                
-                # deregister subscriber
-                self.image_sub.unregister()
-
-                # call object inference method
-                bounding_boxes = self.object_inference()  
-                print(bounding_boxes)
-
-                    
+            print("The extracted bounding boxes are : ", bounding_boxes)
+            print("The extracted objects are : ", object_names)
     
     def object_inference(self):
 
@@ -178,10 +120,6 @@ class object_detection():
         x = [clip]
         predictions = model(x)
 
-        # print("---------------------------")
-        # print("Fast RCNN output: \n",predictions)
-        # print("---------------------------")
-
         #print prediction boxes on input image
         output_bb_ary = predictions[0]['boxes'].detach().numpy()
         output_labels_ary = predictions[0]['labels'].detach().numpy()
@@ -198,7 +136,7 @@ class object_detection():
             object_name = self.COCO_INSTANCE_CATEGORY_NAMES[value]
             score = output_scores_ary[idx]
 
-            if score > 0.0:
+            if score > 0.3:
                 detected_object_list.append(object_name)
                 detected_object_score.append(score)
                 detected_bb_list.append(output_bb_ary[idx])
@@ -206,7 +144,6 @@ class object_detection():
                 print("{}, {}".format(object_name, score))
 
         for object_idx in range(len(detected_bb_list)):
-            # Referee output message publishing
             object_detection_msg = ObjectDetectionResult()
             object_detection_msg.message_type = ObjectDetectionResult.RESULT
             object_detection_msg.result_type = ObjectDetectionResult.BOUNDING_BOX_2D
@@ -216,67 +153,11 @@ class object_detection():
             object_detection_msg.box2d.max_x = int(detected_bb_list[object_idx][2])
             object_detection_msg.box2d.max_y = int(detected_bb_list[object_idx][3])
 
-            self.final_bounding_boxes.append([object_detection_msg.box2d.min_x, object_detection_msg.box2d.min_y, object_detection_msg.box2d.max_x, object_detection_msg.box2d.max_y])
+            self.detected_bounding_boxes.append([object_detection_msg.box2d.min_x, object_detection_msg.box2d.min_y, 
+                                            object_detection_msg.box2d.max_x, object_detection_msg.box2d.max_y])
+            self.detected_object_names.append(detected_object_list[object_idx])
 
-            # print("for id {} the bounding box is [ {}, {}, {}, {}]".format(object_idx, object_detection_msg.box2d.min_x, object_detection_msg.box2d.min_y, object_detection_msg.box2d.max_x, object_detection_msg.box2d.max_y))
-
-            # #convert OpenCV image to ROS image message
-            # ros_image = self.cv2_to_imgmsg(self.image_queue[0])
-            # object_detection_msg.image = ros_image
-
-            # #publish message
-            # self.output_bb_pub.publish(object_detection_msg)
-
-            # #draw bounding box on target detected object
-            # opencv_img = cv2.rectangle(opencv_img, (int(detected_bb_list[object_idx][0]), 
-            #                                         int(detected_bb_list[object_idx][1])), 
-            #                                         (int(detected_bb_list[object_idx][2]), 
-            #                                         int(detected_bb_list[object_idx][3])), 
-            #                                         (255,255,255), 2)
-
-            # display image
-            # cv2.imshow('Output Img', opencv_img)
-            # cv2.waitKey(0)
-            # cv2.destroyAllWindows()
-
-
-        # ready for next image
-        self.stop_sub_flag = False
-        self.image_queue = []
-
-        return self.final_bounding_boxes
-
-    # def _referee_command_cb(self, msg):
-        
-    #     # Referee comaand message (example)
-    #     '''
-    #     task: 1
-    #     command: 1
-    #     task_config: "{\"Target object\": \"Cup\"}"
-    #     uid: "0888bd42-a3dc-4495-9247-69a804a64bee"
-    #     '''
-
-    #     # START command from referee
-    #     if msg.task == 1 and msg.command == 1:
-
-    #         print("\nStart command received")
-
-    #         # start subscriber for image topic
-    #         self.image_sub = rospy.Subscriber("/hsrb/head_rgbd_sensor/rgb/image_raw", 
-    #                                             Image, 
-    #                                             self._input_image_cb)
-
-    #         #extract target object from task_config            
-    #         self.requested_object = msg.task_config.split(":")[1].split("\"")[1]
-    #         print("\n")
-    #         print("Requested object: ", self.requested_object)
-    #         print("\n")
-        
-    #     # STOP command from referee
-    #     if msg.command == 2:
-    #         self.stop_sub_flag = True
-    #         self.image_sub.unregister()
-    #         rospy.loginfo("Subscriber stopped")
+        return self.detected_bounding_boxes, self.detected_object_names
                 
 
 if __name__ == "__main__":
