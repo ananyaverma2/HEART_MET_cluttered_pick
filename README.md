@@ -3,7 +3,7 @@
 ## Overall functionality
 
 
-<img align="right" width="20%" src="images/overview.png">
+<img align="right" width="34%" src="images/overview.png">
 
 - The robot perceives its environment and the data is published on the topics to which we subscribe to.
 - Once we get the image of the environment, object detection 
