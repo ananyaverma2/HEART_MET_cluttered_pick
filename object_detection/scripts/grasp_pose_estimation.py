@@ -4,6 +4,7 @@
 
 # Import the necessary libraries
 from tokenize import String
+from turtle import pos
 from urllib import request
 import numpy as np
 import sys
@@ -38,12 +39,14 @@ import torch
 import torchvision
 import math
 from sensor_msgs.msg import CameraInfo, Image
+import copy
+from geometry_msgs.msg import PoseStamped
 
 class grasp_pose_estimation():
     def __init__(self) -> None:
         rospy.loginfo("ROS image msg to OpenCV image converter node is ready...")
         self.image_queue = None
-        self.clip_size = 10 #manual number
+        self.clip_size = 2 #manual number
         self.detected_bounding_boxes = []
         self.detected_object_names = []
         self.centroids_of_detected_objects = []
@@ -69,10 +72,13 @@ class grasp_pose_estimation():
         self.P = None
         self.cv_image = None
         self.image_sub = rospy.Subscriber(
-            "/hsrb/head_rgbd_sensor/rgb/image_raw", Image, self._input_image_cb)
+            "/arm_cam3d/rgb/image_raw", Image, self._input_image_cb) 
 
-        rospy.Subscriber('/hsrb/head_rgbd_sensor/rgb/camera_info', CameraInfo, self.callback_camerainfo)    
-        rospy.Subscriber('/hsrb/head_rgbd_sensor/depth_registered/image_raw', Image, self._depth_image)    
+        rospy.Subscriber('/arm_cam3d/rgb/camera_info', CameraInfo, self.callback_camerainfo)  
+        #/arm_cam3d/depth/image_rect_raw  
+        #/arm_cam3d/aligned_depth_to_rgb/image_raw
+        rospy.Subscriber('/arm_cam3d/aligned_depth_to_rgb/image_raw', Image, self._depth_image)
+        self.object_pose_publisher = rospy.Publisher('/grasp_pose_estimation/predicted_object_pose', PoseStamped, queue_size = 10)    
 
 
     def imgmsg_to_cv2(self,img_msg):
@@ -206,19 +212,10 @@ class grasp_pose_estimation():
     def callback_camerainfo(self, msg):
         camera_info_P = np.array(msg.P)
         self.P = np.array(camera_info_P).reshape([3, 4])
+        self.binning_x = max(1, msg.binning_x)
+        self.binning_y = max(1, msg.binning_y)
+        self.raw_roi = copy.copy(msg.roi)
 
-    def cx(self, P):
-        """ Returns x center """
-        return self.P[0][2]
-    def cy(self, P):
-        """ Returns y center """
-        return self.P[1][2]
-    def fx(self, P):
-        """ Returns x focal length """
-        return self.P[0][0]
-    def fy(self, P):
-        """ Returns y focal length """
-        return self.P[1][1]
 
     def projectPixelTo3dRay(self, centroids_of_detected_objects, P, cv_image):
         """
@@ -228,28 +225,32 @@ class grasp_pose_estimation():
         using the camera :math:`P` matrix.
         This is the inverse of :meth:`project3dToPixel`.
         """
-        
-        P = np.array([self.P])
 
         for centroids in centroids_of_detected_objects:
+
+            self.P[0,0] /= self.binning_x
+            self.P[1,1] /= self.binning_y
+            self.P[0,2] = (self.P[0,2] - self.raw_roi.x_offset) / self.binning_x
+            self.P[1,2] = (self.P[1,2] - self.raw_roi.y_offset) / self.binning_y
         
             # centroids are considered as [H*W] on the contrary to opencv where it takes it as [W*H]
-            x = (centroids[0] - self.cx(self.P)) / self.fx(self.P)
-            y = (centroids[1] - self.cy(self.P)) / self.fy(self.P)
+            x = (centroids[0] - self.P[0][2]) / self.P[0][0]
+            y = (centroids[1] - self.P[1][2]) / self.P[1][1]
             norm = math.sqrt(x*x + y*y + 1)
             x /= norm
             y /= norm
             z = 1.0 / norm
 
             print("the depth is : ", cv_image[centroids[0]][centroids[1]]/1000)
-            coord_3D = [x,y,z*(cv_image[centroids[0]][centroids[1]]/1000)[0]]
+            depth = (cv_image[centroids[0]][centroids[1]]/1000)[0]
+            coord_3D = [x, y, z*depth]
             self.positions_of_detected_objects.append(coord_3D)
 
         return self.positions_of_detected_objects
 
     def _depth_image(self, msg):
-        print("depth image received")
         self.depth_image = self.imgmsg_to_cv2_depth(msg)
+        self.frame_id = msg.header.frame_id
 
 
     def _input_image_cb(self, msg):
@@ -265,7 +266,6 @@ class grasp_pose_estimation():
             self.image_queue = []
         
         self.image_queue.append(self.cv_image)
-        print("final image size", self.cv_image.shape)
 
         if len(self.image_queue) > self.clip_size:
             #Clip size reached
@@ -279,6 +279,19 @@ class grasp_pose_estimation():
             centroids_of_detected_objects = self.centroid(bounding_boxes, opencv_img)
             positions_of_detected_objects = self.projectPixelTo3dRay(centroids_of_detected_objects, self.P, self.depth_image)
 
+            object_pose= PoseStamped()
+            
+            for i in positions_of_detected_objects:
+                #publish object pose
+                rospy.loginfo("Publishing object pose: %s" % i)
+                object_pose.header.frame_id = self.frame_id
+                object_pose.header.stamp = rospy.Time.now()
+                object_pose.pose.position.x = i[0]
+                object_pose.pose.position.y = i[1]
+                object_pose.pose.position.z = i[2]
+                object_pose.pose.orientation.w = 1.0
+                self.object_pose_publisher.publish(object_pose)
+               
             print("=============================================================")
             print("The extracted bounding boxes are : ", bounding_boxes)
             print("The extracted objects are : ", object_names)
