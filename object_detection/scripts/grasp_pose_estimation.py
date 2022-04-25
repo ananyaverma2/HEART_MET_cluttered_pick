@@ -1,5 +1,26 @@
 #!/usr/bin/env python3
 
+#!/usr/bin/env python3
+
+# Import the necessary libraries
+from tokenize import String
+from urllib import request
+import numpy as np
+import sys
+
+from sympy import re
+import rospy # Python library for ROS
+from sensor_msgs.msg import Image # Image is the message type
+from std_msgs.msg import String # String is the message type
+from cv_bridge import CvBridge, CvBridgeError # Package to convert between ROS and OpenCV Images
+import cv2 # OpenCV library
+from sensor_msgs.msg import Image
+from metrics_refbox_msgs.msg import ObjectDetectionResult, Command
+
+#import pytorch
+import torch
+import torchvision
+
 # Import the necessary libraries
 from tokenize import String
 from urllib import request
@@ -20,15 +41,15 @@ from sensor_msgs.msg import CameraInfo, Image
 
 class grasp_pose_estimation():
     def __init__(self) -> None:
-        rospy.loginfo("Object Detection node is ready...")
+        rospy.loginfo("ROS image msg to OpenCV image converter node is ready...")
         self.image_queue = None
-        self.clip_size = 5 #manual number
+        self.clip_size = 10 #manual number
         self.detected_bounding_boxes = []
         self.detected_object_names = []
         self.centroids_of_detected_objects = []
         self.positions_of_detected_objects = []
 
-        # COCO dataset labels
+
         self.COCO_INSTANCE_CATEGORY_NAMES = [
             '__background__', 'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus',
             'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'N/A', 'stop sign',
@@ -45,16 +66,38 @@ class grasp_pose_estimation():
         ]
 
         rospy.loginfo("Run the .bag files...")
-
-        self.stop_sub_flag = False
-        self.coor_2D = [30,40]
         self.P = None
         self.cv_image = None
-        self.image_sub = rospy.Subscriber("/hsrb/head_rgbd_sensor/rgb/image_raw", Image, self._input_image_cb)
+        self.image_sub = rospy.Subscriber(
+            "/hsrb/head_rgbd_sensor/rgb/image_raw", Image, self._input_image_cb)
 
-        rospy.Subscriber('/hsrb/head_rgbd_sensor/rgb/camera_info', CameraInfo, self.callback_camerainfo)
+        rospy.Subscriber('/hsrb/head_rgbd_sensor/rgb/camera_info', CameraInfo, self.callback_camerainfo)    
+        rospy.Subscriber('/hsrb/head_rgbd_sensor/depth_registered/image_raw', Image, self._depth_image)    
 
-    def imgmsg_to_cv2(self, img_msg):
+
+    def imgmsg_to_cv2(self,img_msg):
+        if img_msg.encoding != "bgr8":
+            # rospy.logerr("This Coral detect node has been hardcoded to the 'bgr8' encoding.  Come change the code if you're actually trying to implement a new camera")
+            dtype = np.dtype("uint8") # Hardcode to 8 bits...
+            dtype = dtype.newbyteorder('>' if img_msg.is_bigendian else '<')
+            image_opencv = np.ndarray(shape=(img_msg.height, img_msg.width, 3), # and three channels of data. Since OpenCV works with bgr natively, we don't need to reorder the channels.
+                        dtype=dtype, buffer=img_msg.data)
+            # If the byt order is different between the message and the system.
+            if img_msg.is_bigendian == (sys.byteorder == 'little'):
+                image_opencv = image_opencv.byteswap().newbyteorder()
+            return image_opencv
+
+    def cv2_to_imgmsg(self,cv_image):
+        img_msg = Image()
+        img_msg.height = cv_image.shape[0]
+        img_msg.width = cv_image.shape[1]
+        img_msg.encoding = "bgr8"
+        img_msg.is_bigendian = 0
+        img_msg.data = cv_image.tostring()
+        img_msg.step = len(img_msg.data) // img_msg.height # That double line is actually integer division, not a comment
+        return img_msg
+
+    def imgmsg_to_cv2_depth(self,img_msg):
         if img_msg.encoding != "bgr8":
             # rospy.logerr("This Coral detect node has been hardcoded to the 'bgr8' encoding.  Come change the code if you're actually trying to implement a new camera")
             dtype = np.dtype("uint8") # Hardcode to 8 bits...
@@ -66,17 +109,8 @@ class grasp_pose_estimation():
                 image_opencv = image_opencv.byteswap().newbyteorder()
             return image_opencv
 
-    def cv2_to_imgmsg(self, cv_image):
-        img_msg = Image()
-        img_msg.height = self.cv_image.shape[0]
-        img_msg.width = self.cv_image.shape[1]
-        img_msg.encoding = "bgr8"
-        img_msg.is_bigendian = 0
-        img_msg.data = self.cv_image.tostring()
-        img_msg.step = len(img_msg.data) // img_msg.height # That double line is actually integer division, not a comment
-        return img_msg
     
-    def centroid(self,bounding_boxes):
+    def centroid(self,bounding_boxes, img):
 
         for bbox in bounding_boxes:
             x1 = bbox[0]
@@ -85,22 +119,29 @@ class grasp_pose_estimation():
             y2 = bbox[3]
             length = x2-x1
             breadth = y2-y1
-            centroid = [int((length/2)+x1), int((breadth/2)+y1)]
+            centroid = [int((breadth/2)+y1), int((length/2)+x1)]
             self.centroids_of_detected_objects.append(centroid)
+            cv2.line(img, (x1-10, y1-10), (x1+10, y1+10), (0,255,255), 3)
+            cv2.line(img, (centroid[1]-10, centroid[0]-10), (centroid[1]+10, centroid[0]+10), (0,0,255), 3)
+            cv2.line(img, (centroid[1]-10, centroid[0]+10), (centroid[1]+10, centroid[0]-10), (0,0,255), 3)
         
         return self.centroids_of_detected_objects
-    
+
     def object_inference(self):
 
         rospy.loginfo("Object Inferencing Started...")
-        
+
         opencv_img = self.image_queue[0]
+
+        print("initial size ", opencv_img.shape)
 
         # opencv image dimension in Height x Width x Channel
         clip = torch.from_numpy(opencv_img)
 
         #convert to torch image dimension Channel x Height x Width
         clip = clip.permute(2, 0, 1)
+
+        # print(clip.shape)
 
         model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
 
@@ -134,7 +175,10 @@ class grasp_pose_estimation():
 
                 print("{}, {}".format(object_name, score))
 
+
+        # Only publish the target object requested by the referee
         for object_idx in range(len(detected_bb_list)):
+            # Referee output message publishing
             object_detection_msg = ObjectDetectionResult()
             object_detection_msg.message_type = ObjectDetectionResult.RESULT
             object_detection_msg.result_type = ObjectDetectionResult.BOUNDING_BOX_2D
@@ -144,11 +188,20 @@ class grasp_pose_estimation():
             object_detection_msg.box2d.max_x = int(detected_bb_list[object_idx][2])
             object_detection_msg.box2d.max_y = int(detected_bb_list[object_idx][3])
 
+            #convert OpenCV image to ROS image message
+            ros_image = self.cv2_to_imgmsg(self.image_queue[0])
+            object_detection_msg.image = ros_image
+
+            # calculate centroids
             self.detected_bounding_boxes.append([object_detection_msg.box2d.min_x, object_detection_msg.box2d.min_y, 
                                             object_detection_msg.box2d.max_x, object_detection_msg.box2d.max_y])
             self.detected_object_names.append(detected_object_list[object_idx])
 
-        return self.detected_bounding_boxes, self.detected_object_names
+        # ready for next image
+        # self.stop_sub_flag = False
+
+        return self.detected_bounding_boxes, self.detected_object_names, detected_bb_list, opencv_img
+
 
     def callback_camerainfo(self, msg):
         camera_info_P = np.array(msg.P)
@@ -180,6 +233,7 @@ class grasp_pose_estimation():
 
         for centroids in centroids_of_detected_objects:
         
+            # centroids are considered as [H*W] on the contrary to opencv where it takes it as [W*H]
             x = (centroids[0] - self.cx(self.P)) / self.fx(self.P)
             y = (centroids[1] - self.cy(self.P)) / self.fy(self.P)
             norm = math.sqrt(x*x + y*y + 1)
@@ -187,23 +241,31 @@ class grasp_pose_estimation():
             y /= norm
             z = 1.0 / norm
 
+            print("the depth is : ", cv_image[centroids[0]][centroids[1]]/1000)
             coord_3D = [x,y,z*(cv_image[centroids[0]][centroids[1]]/1000)[0]]
             self.positions_of_detected_objects.append(coord_3D)
 
         return self.positions_of_detected_objects
 
+    def _depth_image(self, msg):
+        print("depth image received")
+        self.depth_image = self.imgmsg_to_cv2_depth(msg)
+
+
     def _input_image_cb(self, msg):
         """
-        :msg: sensor_msgs.Image
+        :msg: sensor_msgs.Images
         :returns: None
         """
 
         # convert ros image to opencv image
+        print("image receive")
         self.cv_image = self.imgmsg_to_cv2(msg)
         if self.image_queue is None:
             self.image_queue = []
         
         self.image_queue.append(self.cv_image)
+        print("final image size", self.cv_image.shape)
 
         if len(self.image_queue) > self.clip_size:
             #Clip size reached
@@ -213,14 +275,23 @@ class grasp_pose_estimation():
             self.image_sub.unregister()
 
             # call object inference method
-            bounding_boxes, object_names = self.object_inference() 
-            centroids_of_detected_objects = self.centroid(bounding_boxes)
-            positions_of_detected_objects = self.projectPixelTo3dRay(centroids_of_detected_objects, self.P, self.cv_image)
+            bounding_boxes, object_names, detected_bb_list, opencv_img = self.object_inference() 
+            centroids_of_detected_objects = self.centroid(bounding_boxes, opencv_img)
+            positions_of_detected_objects = self.projectPixelTo3dRay(centroids_of_detected_objects, self.P, self.depth_image)
 
+            print("=============================================================")
             print("The extracted bounding boxes are : ", bounding_boxes)
             print("The extracted objects are : ", object_names)
             print("The extracted centroid of the objects are : ", centroids_of_detected_objects)
             print("The positions of detected objects are : ", positions_of_detected_objects)
+            print("=============================================================")
+
+            for i in detected_bb_list:
+                opencv_img = cv2.rectangle(opencv_img, (i[0], i[1]), (i[2], i[3]), (255,255,255), 2)
+
+            cv2.imshow('Output Img', opencv_img)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
                 
 
 if __name__ == "__main__":
