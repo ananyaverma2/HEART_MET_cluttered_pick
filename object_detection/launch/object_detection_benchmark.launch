@@ -2,10 +2,7 @@
 <launch>
 
     <!-- launching object detection benchmark node -->
-    <node pkg="object_detection" type="convert_ros_img_to_cv.py" name="object_detection_node" output="screen">
+    <node pkg="object_detection" type="convert_ros_img_to_cv.py" name="convert_rosImg_to_cvImg" output="screen">
     </node>
-
-    <!-- launching metrics refbox client node -->
-    <include file="$(find metrics_refbox_client)/launch/metrics_refbox_client.launch" />
 
 </launch>
