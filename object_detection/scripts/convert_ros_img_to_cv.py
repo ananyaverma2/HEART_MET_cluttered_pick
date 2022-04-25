@@ -3,33 +3,35 @@
 # Import the necessary libraries
 from tokenize import String
 from urllib import request
+import numpy as np
+import sys
 
-from sympy import capture, re
+from sympy import re
 import rospy # Python library for ROS
 from sensor_msgs.msg import Image # Image is the message type
 from std_msgs.msg import String # String is the message type
+from cv_bridge import CvBridge, CvBridgeError # Package to convert between ROS and OpenCV Images
 import cv2 # OpenCV library
 from sensor_msgs.msg import Image
 from metrics_refbox_msgs.msg import ObjectDetectionResult, Command
-import rospkg
-import os
-from datetime import datetime
-import sys
-import numpy as np
 
 #import pytorch
 import torch
 import torchvision
 
-class object_detection():
+class convert_image():
     def __init__(self) -> None:
-        rospy.loginfo("Object Detection node is ready...")
+        rospy.loginfo("ROS image msg to OpenCV image converter node is ready...")
+        self.cv_bridge = CvBridge()
         self.image_queue = None
-        self.clip_size = 5 #manual number
-        self.detected_bounding_boxes = []
-        self.detected_object_names = []
+        self.clip_size = 10 #manual number
+        self.stop_sub_flag = False
 
-        # COCO dataset labels
+        self.image_sub = rospy.Subscriber(
+            "/hsrb/head_rgbd_sensor/rgb/image_raw", Image, self._input_image_cb)
+
+
+
         self.COCO_INSTANCE_CATEGORY_NAMES = [
             '__background__', 'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus',
             'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'N/A', 'stop sign',
@@ -44,23 +46,21 @@ class object_detection():
             'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'N/A', 'book',
             'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush'
         ]
+   
 
-        rospy.loginfo("Run the .bag files...")
-        self.image_sub = rospy.Subscriber("/hsrb/head_rgbd_sensor/rgb/image_raw", Image, self._input_image_cb)
-
-    def imgmsg_to_cv2(self, img_msg):
+    def imgmsg_to_cv2(self,img_msg):
         if img_msg.encoding != "bgr8":
             # rospy.logerr("This Coral detect node has been hardcoded to the 'bgr8' encoding.  Come change the code if you're actually trying to implement a new camera")
             dtype = np.dtype("uint8") # Hardcode to 8 bits...
             dtype = dtype.newbyteorder('>' if img_msg.is_bigendian else '<')
-            image_opencv = np.ndarray(shape=(img_msg.height, img_msg.width, 1), # and three channels of data. Since OpenCV works with bgr natively, we don't need to reorder the channels.
+            image_opencv = np.ndarray(shape=(img_msg.height, img_msg.width, 3), # and three channels of data. Since OpenCV works with bgr natively, we don't need to reorder the channels.
                         dtype=dtype, buffer=img_msg.data)
             # If the byt order is different between the message and the system.
             if img_msg.is_bigendian == (sys.byteorder == 'little'):
                 image_opencv = image_opencv.byteswap().newbyteorder()
             return image_opencv
 
-    def cv2_to_imgmsg(self, cv_image):
+    def cv2_to_imgmsg(self,cv_image):
         img_msg = Image()
         img_msg.height = cv_image.shape[0]
         img_msg.width = cv_image.shape[1]
@@ -69,38 +69,67 @@ class object_detection():
         img_msg.data = cv_image.tostring()
         img_msg.step = len(img_msg.data) // img_msg.height # That double line is actually integer division, not a comment
         return img_msg
-        
+
+    def centroid(self, object_detection_msg, img):
+        x1 = object_detection_msg.box2d.min_x
+        y1 = object_detection_msg.box2d.min_y
+        x2 = object_detection_msg.box2d.max_x
+        y2 = object_detection_msg.box2d.max_y
+        length = x2-x1
+        breadth = y2-y1
+        centroid = [int((length/2)+x1), int((breadth/2)+y1)]
+        print("the bounding boxes are : ", x1, y1, x2, y2)
+        print("length, breadth and centroid are : ", length, breadth, centroid)
+        cv2.line(img, (centroid[0]-10, centroid[1]-10), (centroid[0]+10, centroid[1]+10), (0,0,255), 3)
+        cv2.line(img, (centroid[0]-10, centroid[1]+10), (centroid[0]+10, centroid[1]-10), (0,0,255), 3)
+
     def _input_image_cb(self, msg):
         """
         :msg: sensor_msgs.Image
         :returns: None
         """
-            
-        # convert ros image to opencv image
-        cv_image = self.imgmsg_to_cv2(msg)
-        if self.image_queue is None:
-            self.image_queue = []
-        
-        self.image_queue.append(cv_image)
+        try:
+            if not self.stop_sub_flag:
+                rospy.loginfo("Image received..")
+                cv_image = self.imgmsg_to_cv2(msg)
+                if self.image_queue is None:
+                    self.image_queue = []
 
-        if len(self.image_queue) > self.clip_size:
-            #Clip size reached
-            # print("Clip size reached...")
-            rospy.loginfo("Image received..")
-            
-            # deregister subscriber
-            self.image_sub.unregister()
+                self.image_queue.append(cv_image)
+                # print("Counter: ", len(self.image_queue))
 
-            # call object inference method
-            bounding_boxes, object_names = self.object_inference()  
+                if len(self.image_queue) > self.clip_size:
+                    #Clip size reached
+                    # print("Clip size reached...")
 
-            print("The extracted bounding boxes are : ", bounding_boxes)
-            print("The extracted objects are : ", object_names)
-    
+                    self.stop_sub_flag = True
+                    self.image_queue.pop(0)
+
+                    # save all images on local drive
+                    cnt = 0
+                    for i in self.image_queue:
+                        cv2.imwrite('/home/ananya/Documents/B-it-bots/cluttered_picking/clutter_ws/temp_images/temp_images_' + str(cnt) + '.jpg',i)
+                        cnt+=1
+
+                    rospy.loginfo("Input images saved on local drive")
+
+                    # call object inference method
+                    # print("Image queue size: ", len(self.image_queue))
+
+                    output_prediction = self.object_inference()  
+            # else:
+            #     print("Clip size reached")
+
+        except CvBridgeError as e:
+            rospy.logerr("Could not convert ros sensor msgs Image to opencv Image.")
+            rospy.logerr(str(e))
+            self._check_failure()
+            return
+
     def object_inference(self):
 
         rospy.loginfo("Object Inferencing Started...")
-        
+
         opencv_img = self.image_queue[0]
 
         # opencv image dimension in Height x Width x Channel
@@ -120,6 +149,10 @@ class object_detection():
         x = [clip]
         predictions = model(x)
 
+        # print("---------------------------")
+        # print("Fast RCNN output: \n",predictions)
+        # print("---------------------------")
+
         #print prediction boxes on input image
         output_bb_ary = predictions[0]['boxes'].detach().numpy()
         output_labels_ary = predictions[0]['labels'].detach().numpy()
@@ -136,14 +169,26 @@ class object_detection():
             object_name = self.COCO_INSTANCE_CATEGORY_NAMES[value]
             score = output_scores_ary[idx]
 
-            if score > 0.3:
+            if score > 0.5:
                 detected_object_list.append(object_name)
                 detected_object_score.append(score)
                 detected_bb_list.append(output_bb_ary[idx])
 
                 print("{}, {}".format(object_name, score))
 
+        print("---------------------------")
+
+        # if len(detected_object_list) > 0:
+        #     self.object_detected = True
+        # else:
+        #     self.object_detected = False
+
+        detected_objects = []
+
+
+        # Only publish the target object requested by the referee
         for object_idx in range(len(detected_bb_list)):
+            # Referee output message publishing
             object_detection_msg = ObjectDetectionResult()
             object_detection_msg.message_type = ObjectDetectionResult.RESULT
             object_detection_msg.result_type = ObjectDetectionResult.BOUNDING_BOX_2D
@@ -153,15 +198,29 @@ class object_detection():
             object_detection_msg.box2d.max_x = int(detected_bb_list[object_idx][2])
             object_detection_msg.box2d.max_y = int(detected_bb_list[object_idx][3])
 
-            self.detected_bounding_boxes.append([object_detection_msg.box2d.min_x, object_detection_msg.box2d.min_y, 
-                                            object_detection_msg.box2d.max_x, object_detection_msg.box2d.max_y])
-            self.detected_object_names.append(detected_object_list[object_idx])
+            #convert OpenCV image to ROS image message
+            ros_image = self.cv2_to_imgmsg(self.image_queue[0])
+            object_detection_msg.image = ros_image
 
-        return self.detected_bounding_boxes, self.detected_object_names
-                
+            # calculate centroids
+            self.centroid(object_detection_msg, opencv_img)
+
+
+        for i in detected_bb_list:
+            opencv_img = cv2.rectangle(opencv_img, (i[0], i[1]), (i[2], i[3]), (255,255,255), 2)
+
+        cv2.imshow('Output Img', opencv_img)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+        # ready for next image
+        # self.stop_sub_flag = False
+
+        return predictions
+
 
 if __name__ == "__main__":
-    rospy.init_node("object_detection_node")
-    object_detection_obj = object_detection()
-    
+    rospy.init_node("convert_rosImg_to_cvImg")
+    object_img = convert_image()
+
     rospy.spin()
