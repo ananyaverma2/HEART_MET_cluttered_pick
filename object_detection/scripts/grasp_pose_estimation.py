@@ -77,7 +77,7 @@ class grasp_pose_estimation():
         rospy.Subscriber('/arm_cam3d/rgb/camera_info', CameraInfo, self.callback_camerainfo)  
         #/arm_cam3d/depth/image_rect_raw  
         #/arm_cam3d/aligned_depth_to_rgb/image_raw
-        rospy.Subscriber('/arm_cam3d/aligned_depth_to_rgb/image_raw', Image, self._depth_image)
+        rospy.Subscriber('/arm_cam3d/depth/image_rect_raw', Image, self._depth_image)
         self.object_pose_publisher = rospy.Publisher('/grasp_pose_estimation/predicted_object_pose', PoseStamped, queue_size = 10)    
 
 
@@ -237,13 +237,19 @@ class grasp_pose_estimation():
             x = (centroids[0] - self.P[0][2]) / self.P[0][0]
             y = (centroids[1] - self.P[1][2]) / self.P[1][1]
             norm = math.sqrt(x*x + y*y + 1)
+            print("coordinates without norm : ", x,y, "1")
             x /= norm
             y /= norm
             z = 1.0 / norm
 
-            print("the depth is : ", cv_image[centroids[0]][centroids[1]]/1000)
             depth = (cv_image[centroids[0]][centroids[1]]/1000)[0]
             coord_3D = [x, y, z*depth]
+
+            print("#########################################################################")
+            print("the depth is : ", depth)
+            print("the original coordinates are : ", x, y, z)
+            print("the final coordinates are : ", coord_3D)
+            print("#########################################################################")
             self.positions_of_detected_objects.append(coord_3D)
 
         return self.positions_of_detected_objects
@@ -312,17 +318,3 @@ if __name__ == "__main__":
     object_img = grasp_pose_estimation()
     rospy.spin()
 
-
-'''
-values of the different camera matrix 
-D: [0.0, 0.0, 0.0, 0.0, 0.0]
-K: [613.71923828125, 0.0, 314.70098876953125, 0.0, 613.986083984375, 246.9615020751953, 0.0, 0.0, 1.0]
-R: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-P: [613.71923828125, 0.0, 314.70098876953125, 0.0, 0.0, 613.986083984375, 246.9615020751953, 0.0, 0.0, 0.0, 1.0, 0.0]
-'''
-'''
-value of P from the rosbag file
-P = [[538.12050153   0.         320.19070834   0.        ]
- [  0.         538.81613509 230.98657922   0.        ]
- [  0.           0.           1.           0.        ]]
-'''
