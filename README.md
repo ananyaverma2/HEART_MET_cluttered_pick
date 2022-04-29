@@ -24,6 +24,12 @@ Run object detection code: <br/>
 `roslaunch object_detection grasp_pose_estimation.launch`
 
 #### Terminal-2
-Publish images from rosbag files continuously: <br/>
+Publish images from rosbag files continuously using the `-l` argument<br/>
 `rosbag play -l <path_to_bag_file/_.bag>`
+
+**OR**
+
+Connect to the youBot server at `export ROS_MASTER_URI=http://192.168.1.114:11311` for youBot-4 and `export ROS_MASTER_URI=http://192.168.1.142:11311` for youBot-2
+
+
  
