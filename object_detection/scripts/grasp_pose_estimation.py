@@ -50,7 +50,6 @@ from detect_modified import run
 
 class grasp_pose_estimation():
     def __init__(self) -> None:
-        rospy.loginfo("ROS image msg to OpenCV image converter node is ready...")
         self.image_queue = None
         self.clip_size = 2 #manual number
         self.detected_bounding_boxes = []
@@ -74,7 +73,7 @@ class grasp_pose_estimation():
             'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush'
         ]
 
-        rospy.loginfo("Run the .bag files...")
+        rospy.loginfo("Waiting for the topics to be published...")
         self.P = None
         self.cv_image = None
         self.image_sub = rospy.Subscriber(
@@ -106,7 +105,7 @@ class grasp_pose_estimation():
         img_msg.width = cv_image.shape[1]
         img_msg.encoding = "bgr8"
         img_msg.is_bigendian = 0
-        img_msg.data = cv_image.tostring()
+        img_msg.data = cv_image.tobytes()
         img_msg.step = len(img_msg.data) // img_msg.height # That double line is actually integer division, not a comment
         return img_msg
 
@@ -161,8 +160,6 @@ class grasp_pose_estimation():
         detected_bb_list = []
 
         # Extract required objects from prediction output
-        print("---------------------------")
-        print("Name of the objects, Score\n")
         for idx, value in enumerate(output_labels_ary):
             object_name = value
             score = output_scores_ary[idx]
@@ -171,10 +168,6 @@ class grasp_pose_estimation():
                 detected_object_list.append(object_name)
                 detected_object_score.append(score)
                 detected_bb_list.append(output_bb_ary[idx])
-
-                print("{}, {}".format(object_name, score))
-
-        print("---------------------------")
 
 
         # Only publish the target object requested by the referee
@@ -230,31 +223,6 @@ class grasp_pose_estimation():
 
         return self.positions_of_detected_objects
 
-    def findOrientation(self, bounding_boxes):
-        for box in bounding_boxes:
-            point_cloud_of_bbox = []
-            check = []
-
-            x1 = box[0]
-            y1 = box[1]
-            x2 = box[2]
-            y2 = box[3]
-            coor_1 = [x1,y1]
-            coor_2 = [x2,y1]
-            coor_3 = [x1,y2]
-            coor_4 = [x2,y2]
-            for idx in np.ndindex(self.points3D.shape):
-                if x1 <= idx[0] <= x2 and y1 <= idx[1] <= y2:
-                    point_cloud_of_bbox.append(self.points3D[idx])
-            point_clouds = np.array(point_cloud_of_bbox)
-            point_clouds = point_clouds.reshape((y2-y1+1, x2-x1+1,3))
-            print("extracted point clouds", point_clouds.shape)
-            for va in point_cloud_of_bbox:
-                if va not in check:
-                    check.append(va)
-            print("the pc values are", check)
-            plt.plot(len(point_cloud_of_bbox), point_cloud_of_bbox)
-
     def _depth_image(self, msg):
         self.depth_image = point_cloud2.read_points(msg, field_names=("x", "y", "z"), skip_nans=False)
         self.points3D = np.array([point for point in self.depth_image])
@@ -267,7 +235,6 @@ class grasp_pose_estimation():
         """
 
         # convert ros image to opencv image
-        print("image receive")
         self.cv_image = self.imgmsg_to_cv2(msg)
         if self.image_queue is None:
             self.image_queue = []
@@ -276,7 +243,7 @@ class grasp_pose_estimation():
 
         if len(self.image_queue) > self.clip_size:
             #Clip size reached
-            rospy.loginfo("Image received..")
+            rospy.loginfo("Image received...")
             
             # deregister subscriber
             self.image_sub.unregister()
@@ -285,7 +252,6 @@ class grasp_pose_estimation():
             bounding_boxes, object_names, detected_bb_list, opencv_img = self.object_inference() 
             centroids_of_detected_objects = self.centroid(bounding_boxes, opencv_img)
             positions_of_detected_objects = self.projectPixelTo3dRay(centroids_of_detected_objects, self.P, self.depth_image)
-            point_cloud_of_object = self.findOrientation(bounding_boxes)
 
             # object_pose= PoseStamped()
             
@@ -298,15 +264,15 @@ class grasp_pose_estimation():
             #     object_pose.pose.position.y = i[1]
             #     object_pose.pose.position.z = i[2]
             #     object_pose.pose.orientation.w = 1.0
-            #     print("object pose : ", object_pose)
+            #     rospy.loginfo("object pose : ", object_pose)
             #     self.object_pose_publisher.publish(object_pose)
                
-            print("=============================================================")
-            print("The extracted bounding boxes are : ", bounding_boxes)
-            print("The extracted objects are : ", object_names)
-            print("The extracted centroid of the objects are : ", centroids_of_detected_objects)
-            print("The positions of detected objects are : ", positions_of_detected_objects)
-            print("=============================================================")
+            rospy.loginfo("=============================================================")
+            rospy.loginfo("The extracted objects are :  %s ", object_names)
+            rospy.loginfo("The extracted bounding boxes are :  %s ", bounding_boxes)
+            rospy.loginfo("The extracted centroid of the objects are :  %s ", centroids_of_detected_objects)
+            rospy.loginfo("The positions of detected objects are :  %s ", positions_of_detected_objects)
+            rospy.loginfo("=============================================================")
 
             for i in bounding_boxes:
                 opencv_img = cv2.rectangle(opencv_img, (i[0], i[1]), (i[2], i[3]), (255,255,255), 2)
