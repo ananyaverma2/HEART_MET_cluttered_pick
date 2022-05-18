@@ -223,6 +223,26 @@ class grasp_pose_estimation():
 
         return self.positions_of_detected_objects
 
+    def findOrientation(self, bounding_boxes):
+        for box in bounding_boxes:
+            point_cloud_of_bbox = []
+            check = []
+
+            x1 = box[0]
+            y1 = box[1]
+            x2 = box[2]
+            y2 = box[3]
+            coor_1 = [x1,y1]
+            coor_2 = [x2,y1]
+            coor_3 = [x1,y2]
+            coor_4 = [x2,y2]
+            for idx in np.ndindex(self.points3D.shape):
+                if x1 <= idx[0] <= x2 and y1 <= idx[1] <= y2:
+                    point_cloud_of_bbox.append(self.points3D[idx])
+            point_clouds = np.array(point_cloud_of_bbox)
+            point_clouds = point_clouds.reshape((y2-y1+1, x2-x1+1,3))
+            rospy.loginfo("extracted point clouds for bounding box : %s", point_clouds.shape)
+
     def _depth_image(self, msg):
         self.depth_image = point_cloud2.read_points(msg, field_names=("x", "y", "z"), skip_nans=False)
         self.points3D = np.array([point for point in self.depth_image])
@@ -248,10 +268,11 @@ class grasp_pose_estimation():
             # deregister subscriber
             self.image_sub.unregister()
 
-            # call object inference method
+            # call methods
             bounding_boxes, object_names, detected_bb_list, opencv_img = self.object_inference() 
             centroids_of_detected_objects = self.centroid(bounding_boxes, opencv_img)
             positions_of_detected_objects = self.projectPixelTo3dRay(centroids_of_detected_objects, self.P, self.depth_image)
+            point_cloud_of_object = self.findOrientation(bounding_boxes)
 
             # object_pose= PoseStamped()
             
