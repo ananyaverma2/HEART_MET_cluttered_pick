@@ -1,48 +1,21 @@
 #!/usr/bin/env python3
 
-#!/usr/bin/env python3
-
 # Import the necessary libraries
-from tokenize import String
-from turtle import pos
-from urllib import request
 import numpy as np
 import sys
-
 from sympy import re
 import rospy # Python library for ROS
 from sensor_msgs.msg import Image # Image is the message type
-from std_msgs.msg import String # String is the message type
-from cv_bridge import CvBridge, CvBridgeError # Package to convert between ROS and OpenCV Images
 import cv2 # OpenCV library
-from sensor_msgs.msg import Image
-from metrics_refbox_msgs.msg import ObjectDetectionResult, Command
-
-#import pytorch
-import torch
-import torchvision
-
-# Import the necessary libraries
 from tokenize import String
 from urllib import request
-from sympy import capture, re
-import rospy # Python library for ROS
-from std_msgs.msg import String # String is the message type
-import cv2 # OpenCV library
 from metrics_refbox_msgs.msg import ObjectDetectionResult, Command
-import rospkg
-import os
 from datetime import datetime
-import sys
-import numpy as np
 import torch
 import torchvision
-import math
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 from sensor_msgs import point_cloud2
-import copy
 from geometry_msgs.msg import PoseStamped
-import matplotlib.pyplot as plt
 
 #importing yoloV5
 from detect_modified import run
@@ -57,39 +30,23 @@ class grasp_pose_estimation():
         self.centroids_of_detected_objects = []
         self.positions_of_detected_objects = []
 
-
-        self.COCO_INSTANCE_CATEGORY_NAMES = [
-            '__background__', 'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus',
-            'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'N/A', 'stop sign',
-            'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow',
-            'elephant', 'bear', 'zebra', 'giraffe', 'N/A', 'backpack', 'umbrella', 'N/A', 'N/A',
-            'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball',
-            'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket',
-            'bottle', 'N/A', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl',
-            'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza',
-            'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed', 'N/A', 'dining table',
-            'N/A', 'N/A', 'toilet', 'N/A', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone',
-            'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'N/A', 'book',
-            'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush'
-        ]
-
+        rospy.loginfo("=============================================================")
         rospy.loginfo("Waiting for the topics to be published...")
         self.P = None
         self.cv_image = None
-        self.image_sub = rospy.Subscriber(
-            "/arm_cam3d/rgb/image_raw", Image, self._input_image_cb) 
 
+        self.image_sub = rospy.Subscriber("/arm_cam3d/rgb/image_raw", Image, self._input_image_cb) 
         rospy.Subscriber('/arm_cam3d/rgb/camera_info', CameraInfo, self.callback_camerainfo)  
+        rospy.Subscriber('/arm_cam3d/depth_registered/points', PointCloud2, self._depth_image)
 
+        # depth image topics for youBot
         #/arm_cam3d/depth/image_rect_raw  
         #/arm_cam3d/aligned_depth_to_rgb/image_raw
-        rospy.Subscriber('/arm_cam3d/depth_registered/points', PointCloud2, self._depth_image)
-        # self.object_pose_publisher = rospy.Publisher('/grasp_pose_estimation/predicted_object_pose', PoseStamped, queue_size = 10)    
 
+        # self.object_pose_publisher = rospy.Publisher('/grasp_pose_estimation/predicted_object_pose', PoseStamped, queue_size = 10)    
 
     def imgmsg_to_cv2(self,img_msg):
         if img_msg.encoding != "bgr8":
-            # rospy.logerr("This Coral detect node has been hardcoded to the 'bgr8' encoding.  Come change the code if you're actually trying to implement a new camera")
             dtype = np.dtype("uint8") # Hardcode to 8 bits...
             dtype = dtype.newbyteorder('>' if img_msg.is_bigendian else '<')
             image_opencv = np.ndarray(shape=(img_msg.height, img_msg.width, 3), # and three channels of data. Since OpenCV works with bgr natively, we don't need to reorder the channels.
@@ -99,6 +56,7 @@ class grasp_pose_estimation():
                 image_opencv = image_opencv.byteswap().newbyteorder()
             return image_opencv
 
+    # because cv_bridge is not compatible with melodic
     def cv2_to_imgmsg(self,cv_image):
         img_msg = Image()
         img_msg.height = cv_image.shape[0]
@@ -191,20 +149,11 @@ class grasp_pose_estimation():
                                             object_detection_msg.box2d.max_x, object_detection_msg.box2d.max_y])
             self.detected_object_names.append(detected_object_list[object_idx])
 
-        # ready for next image
-        # self.stop_sub_flag = False
-
         return self.detected_bounding_boxes, self.detected_object_names, detected_bb_list, opencv_img
-
-
 
     def callback_camerainfo(self, msg):
         camera_info_P = np.array(msg.P)
         self.P = np.array(camera_info_P).reshape([3, 4])
-        self.binning_x = max(1, msg.binning_x)
-        self.binning_y = max(1, msg.binning_y)
-        self.raw_roi = copy.copy(msg.roi)
-
 
     def projectPixelTo3dRay(self, centroids_of_detected_objects, P, cv_image):
         """
@@ -216,9 +165,7 @@ class grasp_pose_estimation():
         """
 
         for centroids in centroids_of_detected_objects:
-
             coordinates = self.points3D[centroids[0]][centroids[1]]
-
             self.positions_of_detected_objects.append(coordinates)
 
         return self.positions_of_detected_objects
@@ -226,7 +173,6 @@ class grasp_pose_estimation():
     def findOrientation(self, bounding_boxes):
         for box in bounding_boxes:
             point_cloud_of_bbox = []
-            check = []
 
             x1 = box[0]
             y1 = box[1]
@@ -241,7 +187,7 @@ class grasp_pose_estimation():
                     point_cloud_of_bbox.append(self.points3D[idx])
             point_clouds = np.array(point_cloud_of_bbox)
             point_clouds = point_clouds.reshape((y2-y1+1, x2-x1+1,3))
-            rospy.loginfo("extracted point clouds for bounding box : %s", point_clouds.shape)
+            rospy.loginfo("extracted point clouds for bounding box : %s", point_clouds)
 
     def _depth_image(self, msg):
         self.depth_image = point_cloud2.read_points(msg, field_names=("x", "y", "z"), skip_nans=False)
@@ -272,23 +218,8 @@ class grasp_pose_estimation():
             bounding_boxes, object_names, detected_bb_list, opencv_img = self.object_inference() 
             centroids_of_detected_objects = self.centroid(bounding_boxes, opencv_img)
             positions_of_detected_objects = self.projectPixelTo3dRay(centroids_of_detected_objects, self.P, self.depth_image)
-            point_cloud_of_object = self.findOrientation(bounding_boxes)
-
-            # object_pose= PoseStamped()
-            
-            # for i in positions_of_detected_objects:
-            #     # publish object pose
-            #     rospy.loginfo("Publishing object pose:")
-            #     object_pose.header.frame_id = self.frame_id
-            #     object_pose.header.stamp = rospy.Time.now()
-            #     object_pose.pose.position.x = i[0]
-            #     object_pose.pose.position.y = i[1]
-            #     object_pose.pose.position.z = i[2]
-            #     object_pose.pose.orientation.w = 1.0
-            #     rospy.loginfo("object pose : ", object_pose)
-            #     self.object_pose_publisher.publish(object_pose)
+            # point_cloud_of_object = self.findOrientation(bounding_boxes)
                
-            rospy.loginfo("=============================================================")
             rospy.loginfo("The extracted objects are :  %s ", object_names)
             rospy.loginfo("The extracted bounding boxes are :  %s ", bounding_boxes)
             rospy.loginfo("The extracted centroid of the objects are :  %s ", centroids_of_detected_objects)
