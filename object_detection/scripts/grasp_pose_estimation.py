@@ -16,6 +16,13 @@ import torchvision
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 from sensor_msgs import point_cloud2
 from geometry_msgs.msg import PoseStamped
+import math
+
+
+import matplotlib
+matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
+
 
 #importing yoloV5
 from detect_modified import run
@@ -81,7 +88,7 @@ class grasp_pose_estimation():
 
     
     def centroid(self,bounding_boxes, img):
-
+        rospy.loginfo("Finding the centroids of the detected objects...")
         for bbox in bounding_boxes:
             x1 = bbox[0]
             y1 = bbox[1]
@@ -155,7 +162,7 @@ class grasp_pose_estimation():
         camera_info_P = np.array(msg.P)
         self.P = np.array(camera_info_P).reshape([3, 4])
 
-    def projectPixelTo3dRay(self, centroids_of_detected_objects, P, cv_image):
+    def projectPixelTo3dRay(self, centroids_of_detected_objects, P, cv_image, position_yaw):
         """
         :param coor_2D:        rectified pixel coordinates
         :type coor_2D:         (u, v)
@@ -163,14 +170,48 @@ class grasp_pose_estimation():
         using the camera :math:`P` matrix.
         This is the inverse of :meth:`project3dToPixel`.
         """
-
+        rospy.loginfo("Finding the grasp points in 3D...")
+        i = 0
         for centroids in centroids_of_detected_objects:
             coordinates = self.points3D[centroids[0]][centroids[1]]
+            coordinates = list(coordinates)
+            coordinates.append(position_yaw[i])
+            i +=1
             self.positions_of_detected_objects.append(coordinates)
 
         return self.positions_of_detected_objects
 
+
+    def plot_line(self, ax, data: np.ndarray, direction: np.ndarray) -> None:
+        """Plots a 3D line in the given direction along the range of the data points.
+
+        Keyword arguments:
+        ax -- axes to plot the line on
+        data: np.ndarray -- object points
+        direction: np.ndarray -- vector representing the longest object axis
+
+        """
+        # YOUR CODE HERE
+        ax.plot3D(*direction.T, color='red')
+        ax.scatter(data[:,0], data[:,1], data[:,2])
+
+    def unit_vector(self,vector):
+        """ Returns the unit vector of the vector.  """
+        return vector / np.linalg.norm(vector)
+
+    def angle_between(self, v1, v2):
+        """ Returns the angle in radians between vectors 'v1' and 'v2'::
+        """
+        pi = 22/7
+        v1_u = self.unit_vector(v1)
+        v2_u = self.unit_vector(v2)
+        radians = np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
+        degrees = radians*(180/pi)
+        return degrees
+
     def findOrientation(self, bounding_boxes):
+
+        position_yaw = []
         for box in bounding_boxes:
             point_cloud_of_bbox = []
 
@@ -186,8 +227,20 @@ class grasp_pose_estimation():
                 if x1 <= idx[0] <= x2 and y1 <= idx[1] <= y2:
                     point_cloud_of_bbox.append(self.points3D[idx])
             point_clouds = np.array(point_cloud_of_bbox)
-            point_clouds = point_clouds.reshape((y2-y1+1, x2-x1+1,3))
-            rospy.loginfo("extracted point clouds for bounding box : %s", point_clouds)
+            point_clouds = point_clouds.reshape(( (y2-y1+1)*(x2-x1+1) , 3))
+            point_clouds[np.isnan(point_clouds)] = 0.0            
+
+            rospy.loginfo("extracted point clouds for bounding box : %s", point_clouds.shape)
+            covariance_data = np.cov(point_clouds.T)
+            eigenvalues, eigenvectors = np.linalg.eigh(covariance_data)
+            #taking max eigen
+            eigen_direction = eigenvectors[:,2]
+            a1 = eigen_direction
+            a2 = [0,0,1]
+            yaw = self.angle_between(a1,a2)
+            position_yaw.append(yaw)
+        
+        return position_yaw
 
     def _depth_image(self, msg):
         self.depth_image = point_cloud2.read_points(msg, field_names=("x", "y", "z"), skip_nans=False)
@@ -217,8 +270,8 @@ class grasp_pose_estimation():
             # call methods
             bounding_boxes, object_names, detected_bb_list, opencv_img = self.object_inference() 
             centroids_of_detected_objects = self.centroid(bounding_boxes, opencv_img)
-            positions_of_detected_objects = self.projectPixelTo3dRay(centroids_of_detected_objects, self.P, self.depth_image)
-            # point_cloud_of_object = self.findOrientation(bounding_boxes)
+            position_yaw = self.findOrientation(bounding_boxes)
+            positions_of_detected_objects = self.projectPixelTo3dRay(centroids_of_detected_objects, self.P, self.depth_image, position_yaw)
                
             rospy.loginfo("The extracted objects are :  %s ", object_names)
             rospy.loginfo("The extracted bounding boxes are :  %s ", bounding_boxes)
